@@ -431,6 +431,7 @@ pg_decode_begin_txn(LogicalDecodingContext *ctx, ReorderBufferTXN *txn)
 	appendStringInfo(ctx->out, "{%s", data->nl);
 
 	if (data->include_xids)
+		appendStringInfo(ctx->out, "%s\"begin\":%s%u,%s", data->ht, data->sp, txn->xid, data->nl);
 		appendStringInfo(ctx->out, "%s\"xid\":%s%u,%s", data->ht, data->sp, txn->xid, data->nl);
 
 	if (data->include_lsn)
@@ -443,9 +444,11 @@ pg_decode_begin_txn(LogicalDecodingContext *ctx, ReorderBufferTXN *txn)
 	}
 
 	if (data->include_timestamp)
-		appendStringInfo(ctx->out, "%s\"timestamp\":%s\"%s\",%s", data->ht, data->sp, timestamptz_to_str(txn->commit_time), data->nl);
+		appendStringInfo(ctx->out, "%s\"timestamp\":%s\"%s\"%s", data->ht, data->sp, timestamptz_to_str(txn->commit_time), data->nl);
 
-	appendStringInfo(ctx->out, "%s\"change\":%s[", data->ht, data->sp);
+	// appendStringInfo(ctx->out, "%s\"change\":%s[", data->ht, data->sp);
+
+	appendStringInfo(ctx->out, "}");
 
 	if (data->write_in_chunks)
 		OutputPluginWrite(ctx, true);
@@ -457,6 +460,10 @@ pg_decode_commit_txn(LogicalDecodingContext *ctx, ReorderBufferTXN *txn,
 					 XLogRecPtr commit_lsn)
 {
 	JsonDecodingData *data = ctx->output_plugin_private;
+	TransactionId nextXid;
+	uint32 xmin_epoch;
+
+	GetNextXidAndEpoch(&nextXid, &xmin_epoch);
 
 	if (txn->has_catalog_changes)
 		elog(DEBUG2, "txn has catalog changes: yes");
@@ -473,7 +480,16 @@ pg_decode_commit_txn(LogicalDecodingContext *ctx, ReorderBufferTXN *txn,
 	if (!data->write_in_chunks)
 		appendStringInfo(ctx->out, "%s", data->nl);
 
-	appendStringInfo(ctx->out, "%s]%s}", data->ht, data->nl);
+	appendStringInfo(
+		ctx->out,
+		"{\"commit\":%u,\"epoch\":%u,\"t\":\"%s\",\"c_txid\":%u,\"xmin\":%u,\"c_xmin\":%u}",
+		nextXid,
+		xmin_epoch,
+		timestamptz_to_str(txn->commit_time),
+		txn->xid,
+		ctx->slot->effective_xmin,
+		ctx->slot->effective_catalog_xmin
+	);
 
 	OutputPluginWrite(ctx, true);
 }
@@ -932,8 +948,8 @@ pg_decode_change(LogicalDecodingContext *ctx, ReorderBufferTXN *txn,
 
 	appendStringInfo(ctx->out, "%s%s", data->ht, data->ht);
 
-	if (data->nr_changes > 1)
-		appendStringInfoChar(ctx->out, ',');
+	// if (data->nr_changes > 1)
+	// 	appendStringInfoChar(ctx->out, ',');
 
 	appendStringInfo(ctx->out, "{%s", data->nl);
 
@@ -1077,8 +1093,8 @@ pg_decode_message(LogicalDecodingContext *ctx, ReorderBufferTXN *txn,
 
 	appendStringInfo(ctx->out, "%s%s", data->ht, data->ht);
 
-	if (data->nr_changes > 1)
-		appendStringInfoChar(ctx->out, ',');
+	// if (data->nr_changes > 1)
+	// 	appendStringInfoChar(ctx->out, ',');
 
 	appendStringInfo(ctx->out, "{%s%s%s%s\"kind\":%s\"message\",%s", data->nl, data->ht, data->ht, data->ht, data->sp, data->nl);
 
